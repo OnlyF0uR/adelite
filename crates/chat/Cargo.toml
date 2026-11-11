@@ -1,0 +1,11 @@
+[package]
+name = "adelite-chat"
+description = "What a chat is to Adelite, whatever network carries it: chats, messages, and the backend that brings them."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true

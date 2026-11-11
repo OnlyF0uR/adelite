@@ -1,0 +1,4 @@
+# Every developer and CI run builds with the same compiler; upgrading is a commit of its own.
+[toolchain]
+channel = "1.99.0"
+components = ["clippy", "rustfmt"]

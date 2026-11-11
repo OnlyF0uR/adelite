@@ -1,0 +1,64 @@
+[workspace]
+resolver = "3"
+members = ["crates/ui", "crates/chat", "crates/telegram", "crates/chat-view", "crates/desktop"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+publish = false
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+adelite-ui = { path = "crates/ui" }
+adelite-chat = { path = "crates/chat" }
+adelite-chat-view = { path = "crates/chat-view" }
+adelite-telegram = { path = "crates/telegram" }
+# TDLib speaks JSON, and the settings are a JSON file. Values only: no derive, no proc macros.
+serde_json = "1.0.154"
+winit = "0.30.13"
+wgpu = { version = "30.0.1", default-features = false, features = ["std", "wgsl", "dx12", "metal", "vulkan", "gles"] }
+# why: reads OpenType tables (outlines, kerning, ligatures, colour layers) from fonts, some of them the
+# system's and so not ours to trust; a parser for hostile font files is not worth writing by hand.
+ttf-parser = { version = "0.25.1", default-features = false, features = ["std", "opentype-layout"] }
+bytemuck = "1.25.2"
+arboard = { version = "3.7.0", default-features = false }
+# Avatars and photos. Hand-written decoders for hostile input are not worth
+# the risk; these three are fuzzed and pure Rust. zune-jpeg's features are SIMD only.
+png = "0.18.1"
+zune-jpeg = { version = "0.5.15", default-features = false, features = ["std", "x86", "neon"] }
+# why: Telegram sends stickers and some pictures as WebP, from strangers; decoded by a fuzzed pure-Rust crate.
+image-webp = "0.2.4"
+
+[workspace.lints.rust]
+# Unsafe is for C interfaces only; a file that has one says so with `#![expect(unsafe_code)]`.
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+cast_possible_wrap = "allow"
+module_name_repetitions = "allow"
+too_many_lines = "allow"
+# Hex colour literals read best unseparated; UI state structs are flag-heavy.
+unreadable_literal = "allow"
+struct_excessive_bools = "allow"
+# `assert!(x.is_empty())` reads better in tests than `assert_eq!(x, [])`.
+assert_is_empty = "allow"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+# An overflow is a bug: it stops the app rather than corrupting what it shows.
+overflow-checks = true
+
+# Font rasterisation and shader compilation are painfully slow unoptimised.
+[profile.dev.package."*"]
+opt-level = 3

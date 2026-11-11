@@ -1,0 +1,25 @@
+[package]
+name = "adelite-ui"
+description = "Adelite's interface toolkit: the wgpu renderer, text, widgets, the theme, and what an app on the rail implements."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[features]
+# Drawing into a texture and reading it back: snapshots of the interface in tests.
+offscreen = []
+
+[dependencies]
+winit.workspace = true
+wgpu.workspace = true
+ttf-parser.workspace = true # why: see the workspace manifest
+bytemuck.workspace = true
+arboard.workspace = true
+png.workspace = true
+zune-jpeg.workspace = true
+image-webp.workspace = true # why: see the workspace manifest
+
+[lints]
+workspace = true

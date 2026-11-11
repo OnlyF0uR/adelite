@@ -1,0 +1,27 @@
+[package]
+name = "adelite"
+description = "Adelite: a native GPU-rendered desktop app for the day's work, starting with chat."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "adelite"
+path = "src/main.rs"
+
+[dependencies]
+adelite-ui.workspace = true
+adelite-chat-view.workspace = true
+adelite-telegram.workspace = true
+winit.workspace = true
+arboard.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+adelite-ui = { workspace = true, features = ["offscreen"] }
+adelite-chat-view = { workspace = true, features = ["demo"] }
+
+[lints]
+workspace = true

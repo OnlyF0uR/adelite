@@ -1,0 +1,27 @@
+# Build output, and TDLib's source and build (packaging/tdlib/build-windows.ps1 makes them).
+/target
+/vendor
+*.log
+*.pdb
+**/*.rs.bk
+
+# TDLib and the libraries it needs, wherever someone drops a copy to try the app.
+*.dll
+*.dylib
+*.so
+*.so.*
+
+# The Telegram API id and hash for local builds (see .env.example). Never commit them.
+.env
+.env.*
+!.env.example
+
+# Machine- and editor-specific files.
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*~
+.claude/settings.local.json

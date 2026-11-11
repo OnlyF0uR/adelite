@@ -1,0 +1,15 @@
+[package]
+name = "adelite-telegram"
+description = "Telegram for Adelite's chat: TDLib's JSON interface behind the chat backend. No interface code."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+adelite-chat.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

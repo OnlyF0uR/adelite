@@ -1,0 +1,6 @@
+# Text is stored with LF and checked out with LF on every system, whatever git's own settings say.
+* text=auto eol=lf
+
+# Fonts and images, never touched.
+*.ttf binary
+*.png binary

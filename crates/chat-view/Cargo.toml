@@ -1,0 +1,25 @@
+[package]
+name = "adelite-chat-view"
+description = "Adelite's chat app: the list of chats, the conversation and the message box, over any chat backend."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[features]
+# Made-up conversations to draw the app with, for snapshots of the design.
+demo = []
+
+[dependencies]
+adelite-chat.workspace = true
+adelite-ui.workspace = true
+# The module is handed winit's key events and the clipboard as the toolkit takes them.
+winit.workspace = true
+arboard.workspace = true
+
+[dev-dependencies]
+adelite-ui = { workspace = true, features = ["offscreen"] }
+
+[lints]
+workspace = true

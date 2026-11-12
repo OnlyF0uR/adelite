@@ -4,8 +4,9 @@ Adelite is a native desktop app for the day's work: a shell with a rail of apps 
 (Telegram, through TDLib) is the first; mail and documents (Microsoft Graph) are meant to follow. It is a
 Cargo workspace: `crates/ui` (the toolkit and the `Module` trait), `crates/chat` (the chat model and the
 `Backend` trait, no dependencies), `crates/telegram` (TDLib behind `Backend`, no interface code),
-`crates/chat-view` (the chat app, a `Module` over any `Backend`) and `crates/desktop` (the shell; package
-and binary `adelite`). `README.md` describes every feature, the crate layout and where data is kept: read
+`crates/chat-view` (the chat app, a `Module` over any `Backend`), `crates/update` (updates from GitHub's
+releases, signed; no interface code) and `crates/desktop` (the shell; package and binary `adelite`).
+Releases are built by `.github/workflows/release.yml` from a `v*` tag, with `packaging/`. `README.md` describes every feature, the crate layout and where data is kept: read
 it before changing behaviour, and keep it current when you do.
 
 ```sh
@@ -40,7 +41,7 @@ cargo fmt --all --check
   fallible runtime paths, non-trivial logic gets a small unit test. Whatever reads TDLib's JSON survives a
   missing or mistyped field (`telegram/src/map.rs`): defaults, never a panic.
 - **TDLib:** check field and function names against `vendor/td/td/generate/scheme/td_api.tl` of the pinned
-  commit (`packaging/tdlib/build-windows.ps1`), not from memory: the schema changes between versions.
+  commit (`packaging/tdlib/COMMIT`), not from memory: the schema changes between versions.
   64-bit numbers arrive as strings (`map::int`); text offsets count UTF-16 units. `td_receive` is called
   from one thread only, which `tdjson::Inbox` enforces.
 - **The API id and hash are the app's, not the user's:** the build takes them from `.env` (git ignores it)
@@ -51,7 +52,9 @@ cargo fmt --all --check
 - **Secrets:** never log the API hash, a code or a password. Files holding them are written atomically,
   `0600` on Unix.
 - **Safety:** links from messages only open `http(s)` and `mailto`. A received file is shown in its
-  folder, never run.
+  folder, never run. An update is run or put in place only after its Ed25519 signature matches the key the
+  app carries (`update/src/signature.rs`); never weaken that check. The private key is the `release`
+  environment's secret `ADELITE_UPDATE_KEY`, never in the repository. Updates happen only when the user asks.
 - **Testing:** the owner tests the GUI and signs in. Don't drive the app with computer use and never ask
   for or use a Telegram account; `cargo build`, `clippy` and `test` are enough. To look at a visual change,
   render the screens offscreen (the README's commands): `chat-view/src/demo.rs` holds the made-up

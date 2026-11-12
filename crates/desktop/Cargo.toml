@@ -15,6 +15,7 @@ path = "src/main.rs"
 adelite-ui.workspace = true
 adelite-chat-view.workspace = true
 adelite-telegram.workspace = true
+adelite-update.workspace = true
 winit.workspace = true
 arboard.workspace = true
 serde_json.workspace = true

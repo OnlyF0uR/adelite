@@ -19,6 +19,7 @@ mod snapshot;
 
 use std::fs::File;
 use std::process::ExitCode;
+use std::time::{Duration, Instant};
 
 use adelite_ui::{log, platform};
 use winit::application::ApplicationHandler;
@@ -78,7 +79,15 @@ impl ApplicationHandler<UserEvent> for Handler {
         // On macOS, quitting from the menu (Cmd+Q) exits the process right
         // after this, so `run_app` never returns: drop the app here, which
         // lets its apps finish what they are writing.
+        let update = self.app.as_mut().and_then(App::take_update);
         self.app = None;
+        // Only now, with everything let go of, may the update replace the app.
+        if let Some(update) = update
+            && let Err(e) = update.apply()
+        {
+            log::error(format!("updating: {e} {}", e.detail()));
+            platform::alert("Adelite could not update", &format!("{e} Adelite stays as it was."));
+        }
     }
 }
 
@@ -91,15 +100,23 @@ fn fail(message: &str) -> ExitCode {
 
 /// Takes the lock that keeps a second copy away: two would open the same
 /// databases. `Ok(None)` when another copy holds it. The lock is held for
-/// as long as the file is.
+/// as long as the file is. A copy started by an update waits for the one it
+/// replaces to finish quitting.
 fn lock_instance() -> std::io::Result<Option<File>> {
     let dir = platform::data_dir()?;
     std::fs::create_dir_all(&dir)?;
     let file = File::options().create(true).truncate(false).write(true).open(dir.join("desktop.lock"))?;
-    match file.try_lock() {
-        Ok(()) => Ok(Some(file)),
-        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
-        Err(std::fs::TryLockError::Error(e)) => Err(e),
+    let patience = if std::env::args().any(|arg| arg == adelite_update::AFTER_UPDATE) { 30 } else { 0 };
+    let until = Instant::now() + Duration::from_secs(patience);
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(Some(file)),
+            Err(std::fs::TryLockError::WouldBlock) if Instant::now() < until => {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(std::fs::TryLockError::WouldBlock) => return Ok(None),
+            Err(std::fs::TryLockError::Error(e)) => return Err(e),
+        }
     }
 }
 

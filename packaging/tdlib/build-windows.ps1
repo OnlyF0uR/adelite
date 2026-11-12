@@ -7,8 +7,9 @@
 #
 #   pwsh packaging/tdlib/build-windows.ps1
 param(
-    # The TDLib commit to build: pinned, so every build is the same library.
-    [string]$Ref = "c8828d50f5eac2fc7089ce1089d7ce9095c61b5e",
+    # The TDLib commit to build: pinned in COMMIT beside this script, so every
+    # build, on every system, is the same library.
+    [string]$Ref = (Get-Content (Join-Path $PSScriptRoot "COMMIT") -TotalCount 1).Trim(),
     # Compilers run at once. TDLib's largest files take over 2 GB each.
     [int]$Jobs = 8
 )

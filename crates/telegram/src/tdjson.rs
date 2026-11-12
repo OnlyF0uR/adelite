@@ -247,9 +247,10 @@ mod sys {
 }
 
 /// Where to look for the library, in order: where `ADELITE_TDJSON` points,
-/// beside the app, in a source checkout's `vendor/tdlib` (a few folders up
-/// from a build in `target/`), in the app's data folder (`dir`), and
-/// wherever the system looks for libraries.
+/// beside the app (and in its bundle's `Contents/Frameworks` on macOS), in a
+/// source checkout's `vendor/tdlib` (a few folders up from a build in
+/// `target/`), in the app's data folder (`dir`), and wherever the system
+/// looks for libraries.
 #[must_use]
 pub fn places(dir: &Path) -> Vec<PathBuf> {
     let mut places = Vec::new();
@@ -257,6 +258,11 @@ pub fn places(dir: &Path) -> Vec<PathBuf> {
     if let Some(beside) = std::env::current_exe().ok().as_deref().and_then(Path::parent) {
         places.push(beside.join(FILE_NAME));
         places.push(beside.join("tdlib").join(FILE_NAME));
+        if cfg!(target_os = "macos")
+            && let Some(contents) = beside.parent()
+        {
+            places.push(contents.join("Frameworks").join(FILE_NAME));
+        }
         // `target/release` is two folders under the checkout, a test's `target/debug/deps` three.
         places.extend(beside.ancestors().skip(2).take(2).map(|up| up.join("vendor").join("tdlib").join(FILE_NAME)));
     }

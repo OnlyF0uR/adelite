@@ -13,12 +13,40 @@ It is written for Windows, macOS and Linux.
 **Status:** early and moving fast. Windows is where it is used and tried; macOS and Linux are built and
 tested by CI but have barely been run.
 
+## Installing and updating
+
+Each release on the [releases page](https://github.com/OnlyF0uR/adelite/releases) has a download per
+system, built by CI ([Releasing](#releasing)):
+
+- **Windows:** `Adelite-<version>-windows-x64-setup.exe` installs for the current user into
+  `%LOCALAPPDATA%\Programs\Adelite`, without asking for administrator rights, with a Start menu entry and an
+  uninstaller. It is not code-signed, so SmartScreen warns the first time: "More info", then "Run anyway".
+- **macOS** (Apple silicon): open `Adelite-<version>-macos-arm64.dmg` and drag Adelite into Applications.
+  It is not signed by an Apple developer, so macOS refuses it at first: try to open it once, then allow it
+  in System Settings, Privacy & Security, "Open Anyway".
+- **Linux** (x86-64): unpack `Adelite-<version>-linux-x64.tar.gz` where you keep programs and run
+  `adelite/adelite`. `adelite.desktop` and `adelite.png` beside it are for a menu entry.
+
+Uninstalling leaves your data in `~/.adelite/` ([Data](#data)).
+
+**Updates.** Settings, "Check for updates" asks GitHub for the newest published release. Nothing is
+checked or downloaded unless it is pressed. When a newer version is out, "Install and restart" downloads
+it, checks its signature, quits, puts it in place and starts it again. On Windows it runs the installer
+silently. On macOS and Linux it replaces the app's files where they are, so that folder must be writable
+(on macOS the app must have been moved into Applications). "What's new" opens the release's page.
+
+Every download is signed (Ed25519) by the release workflow with a key only it holds. The app carries the
+public half (`crates/update/src/signature.rs`) and refuses a download that does not match, so a release
+someone else put up, or a file changed on the way, is never run. Downloads go through the system's `curl`
+(part of Windows 10 and later, macOS and practically every Linux), so the app has no network code of its
+own for this.
+
 ## Getting started
 
 You need Rust (rustup fetches the version `rust-toolchain.toml` pins by itself) and TDLib.
 
-1. **TDLib.** On Windows, `pwsh packaging/tdlib/build-windows.ps1` builds it into `vendor/tdlib/`. On
-   macOS and Linux, build it as Telegram describes. See [TDLib](#tdlib) for both.
+1. **TDLib.** On Windows, `pwsh packaging/tdlib/build-windows.ps1` builds it into `vendor/tdlib/`; on
+   macOS and Linux, `bash packaging/tdlib/build-unix.sh` does. See [TDLib](#tdlib).
 2. **The API id and hash.** Copy `.env.example` to `.env` and fill in the app's pair from
    <https://my.telegram.org/apps>. Git ignores `.env`. Without a pair the build still works and asks for
    one on its first start. See [The API id and hash](#the-api-id-and-hash).
@@ -109,8 +137,9 @@ method while composing (the candidate window still shows it).
 ### TDLib
 
 Adelite loads TDLib's JSON interface (`tdjson`) when it starts. It looks, in order: where the
-`ADELITE_TDJSON` environment variable points, beside the executable, in `tdlib/` beside it, in
-`vendor/tdlib/` of a source checkout, in `~/.adelite/telegram/`, and wherever the system finds libraries.
+`ADELITE_TDJSON` environment variable points, beside the executable, in `tdlib/` beside it, in the app
+bundle's `Contents/Frameworks/` on macOS, in `vendor/tdlib/` of a source checkout, in
+`~/.adelite/telegram/`, and wherever the system finds libraries.
 Without it the app still starts and says what is missing.
 
 Build it on Windows (needs git and Visual Studio 2022 with the C++ workload; about half an hour):
@@ -119,10 +148,12 @@ Build it on Windows (needs git and Visual Studio 2022 with the C++ workload; abo
 pwsh packaging/tdlib/build-windows.ps1
 ```
 
-This builds a pinned TDLib commit from Telegram's source into `vendor/tdlib/` (`tdjson.dll` and the
-OpenSSL and zlib DLLs it needs). To ship the app, put those DLLs beside `adelite.exe`. On macOS and Linux,
-build TDLib as <https://tdlib.github.io/td/build.html> describes and put `libtdjson.dylib` / `libtdjson.so`
-in one of the places above.
+This builds the TDLib commit pinned in `packaging/tdlib/COMMIT` from Telegram's source into
+`vendor/tdlib/` (`tdjson.dll` and the OpenSSL and zlib DLLs it needs). On macOS and Linux,
+`bash packaging/tdlib/build-unix.sh` builds the same commit into `vendor/tdlib/libtdjson.dylib` or
+`libtdjson.so`, with OpenSSL linked in, so the library needs nothing that is not on every system
+(it needs git, CMake, a C++ compiler, gperf, and OpenSSL's and zlib's headers; the script names them).
+The release workflow builds it the same way and packs it with the app.
 
 ### The API id and hash
 
@@ -137,18 +168,36 @@ ADELITE_TELEGRAM_API_ID=1234567
 ADELITE_TELEGRAM_API_HASH=0123456789abcdef0123456789abcdef
 ```
 
-Git ignores `.env`: the hash never goes into the repository. In CI, set the same two names as secrets in the
-environment of the release build, where they win over the file.
+Git ignores `.env`: the hash never goes into the repository. In CI the same two names are secrets of the
+repository's `release` environment ([Releasing](#releasing)), where they win over the file.
 
 The build seals the pair into the binary (`crates/telegram/build.rs`, `src/seal.rs`): XORed with a keystream
 from seeds drawn anew for every build, in a block of fixed size, opened only when TDLib asks. Neither the
 hash nor the id is in the file as text or as anything shaped like one, and release builds carry no symbols.
 That keeps them from a search of the file. It does not keep them from someone who runs the app under a
-debugger, since TDLib must be handed them in the clear; nothing on the user's machine can. So the installer
-is for inside the company, and whoever has the hash can pass for the app and use up its quota.
+debugger, since TDLib must be handed them in the clear; nothing on the user's machine can. The releases are
+public, so take the pair as known, as every open-source Telegram client does: whoever has it can pass for
+the app and use up its quota, or get the id blocked. Then the app says "Telegram did not accept this app",
+and the way out is a new pair (from another phone number: Telegram gives each number one) and a release.
 
 A build made without them still works, for trying the code: it asks for a pair on its first start and
 keeps it in `~/.adelite/telegram/app.json`.
+
+## Releasing
+
+1. Set `version` under `[workspace.package]` in `Cargo.toml` to the new version, and commit.
+2. Tag that commit `v<version>` and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
+3. `.github/workflows/release.yml` checks that the tag and the version agree. It builds TDLib for each
+   system (kept in CI's cache once built for the pinned commit), the app with the API pair, and the
+   downloads (`packaging/`), then signs them and leaves them in a draft release.
+4. Try the draft's downloads, then publish it. Only a published release is offered by "Check for updates".
+
+The workflow runs in the repository's `release` environment, which only `v*` tags may use. It holds three
+secrets: `ADELITE_TELEGRAM_API_ID`, `ADELITE_TELEGRAM_API_HASH`, and `ADELITE_UPDATE_KEY`, the private half
+of the update-signing key (32 bytes in hex). Keep a copy of that key somewhere safe. Without it no update
+can be signed that installed copies accept, and everyone would have to reinstall by hand. The signing tool
+refuses any other key: `ADELITE_UPDATE_KEY=<key> cargo run -p adelite-update --bin adelite-sign -- --public`
+prints the public half of the key it was given.
 
 ## Layout
 
@@ -158,9 +207,11 @@ keeps it in `~/.adelite/telegram/app.json`.
 | `crates/chat` (`adelite-chat`) | What a chat is, whatever network carries it: `Chat`, `Message`, `Command`, `Event`, and the `Backend` trait. No dependencies. |
 | `crates/telegram` (`adelite-telegram`) | Telegram as a `Backend`: loads `tdjson`, speaks its JSON, maps it to the chat model. No interface code. |
 | `crates/chat-view` (`adelite-chat-view`) | The chat app as a `Module`: the list, the conversation, the message box, the sign-in card. Knows `Backend`, not Telegram. |
+| `crates/update` (`adelite-update`) | Updates: the newest release on GitHub, its download and signature check, and putting it in place (the installer on Windows, swapping the files on macOS and Linux). No interface code. Also `adelite-sign`, which signs the release files. |
 | `crates/desktop` (`adelite`) | The shell: the window and event loop, the title bar, the rail, settings. `src/modules.rs` is the one place that names the apps. |
 
-Dependencies point one way: `desktop` → `chat-view` → `ui` and `chat`; `telegram` → `chat`.
+Dependencies point one way: `desktop` → `chat-view` → `ui` and `chat`; `telegram` → `chat`; `desktop` →
+`update`.
 
 ### Adding or replacing an app
 
@@ -178,7 +229,7 @@ which the view draws whatever it asks for.
 No async runtime. The winit thread owns all state and draws. TDLib runs its own threads; one thread of
 ours (`adelite-telegram`) waits in `td_receive`, maps what arrives, and wakes the interface once per batch.
 Commands go to TDLib straight from the interface's thread (`td_send` never blocks). Thumbnails are decoded
-on a worker, file dialogs run on a thread each.
+on a worker, file dialogs run on a thread each, and so do an update's check and download (`adelite-update`).
 
 ## Data
 
@@ -187,7 +238,10 @@ Everything is under `~/.adelite/`:
 - `config.json`: the colour scheme, the zoom, the window's size, whether notifications are shown and
   sounds are heard, and what closing the window does.
 - `desktop.log`, `desktop-crash.log`: problems, and a report if the app crashes.
-- `desktop.lock`: keeps a second copy from starting.
+- `desktop.lock`: keeps a second copy from starting. A copy started by an update waits for it.
+- `update/`: an update's download while it is fetched and checked; removed at the next start. On macOS and
+  Linux an update is unpacked beside the installed app (`.adelite-update/`), and what it replaced waits
+  there as `.<name>.adelite-old` until the next start.
 - `telegram/app.json`: an API id and hash, only in a build made without its own. `telegram/tdlib/`: TDLib's database, which holds the session
   (it is not encrypted: whoever can read this folder can read the account). `telegram/files/`: downloads.
 

@@ -24,6 +24,7 @@ use adelite_ui::theme::{Palette, Scheme};
 use adelite_ui::titlebar::{self, Command, Grab};
 use adelite_ui::ui::Ui;
 use adelite_ui::{Context, Request, Waker, log, platform};
+use adelite_update::{AFTER_UPDATE, Staged, Updater, Version};
 use arboard::Clipboard;
 use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent};
@@ -131,6 +132,8 @@ pub struct App {
     hidden: bool,
     /// The app's sounds.
     sounds: Sounds,
+    /// An update that is ready: the app quits, and it goes in once everything has let go.
+    update: Option<Staged>,
     shell: Shell,
 }
 
@@ -189,7 +192,13 @@ impl App {
         });
         // Without a home directory the apps keep their data where it is at least out of the way.
         let data = dir.unwrap_or_else(|| std::env::temp_dir().join("adelite"));
-        let mut shell = Shell::new(modules::start(&data, &waker));
+        // What an earlier update left (its download, what it replaced) goes first.
+        let work = data.join("update");
+        adelite_update::clean_up(&work);
+        let mut shell = Shell::new(modules::start(&data, &waker), Updater::new(work, Arc::clone(&waker)));
+        if std::env::args().any(|arg| arg == AFTER_UPDATE) {
+            shell.tell(format!("Adelite was updated to {}.", Version::current()), false);
+        }
         (shell.notify, shell.sounds) = (config.notify, config.sounds);
         shell.close = CloseAction::from_key(&config.close);
         // The tray's clicks arrive on its own thread and are handed to this one.
@@ -236,6 +245,7 @@ impl App {
             tray,
             hidden: false,
             sounds: Sounds::default(),
+            update: None,
             shell,
         };
         app.ui.focused = true;
@@ -455,9 +465,19 @@ impl App {
                 let mut requests = Vec::new();
                 self.shell.poll(&mut Context { clipboard: &mut self.clipboard, requests: &mut requests });
                 self.serve(requests);
+                // An update is ready: quit, whatever closing the window does, so it can go in.
+                if let Some(update) = self.shell.take_update() {
+                    self.update = Some(update);
+                    return event_loop.exit();
+                }
             }
         }
         self.window.request_redraw();
+    }
+
+    /// The update to apply once the app has let go of everything, if one is ready.
+    pub fn take_update(&mut self) -> Option<Staged> {
+        self.update.take()
     }
 
     /// Creates the renderer again after the GPU was lost (a driver reset or

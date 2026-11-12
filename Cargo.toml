@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/ui", "crates/chat", "crates/telegram", "crates/chat-view", "crates/desktop"]
+members = ["crates/ui", "crates/chat", "crates/telegram", "crates/chat-view", "crates/update", "crates/desktop"]
 
 [workspace.package]
 version = "0.1.0"
@@ -14,6 +14,7 @@ adelite-ui = { path = "crates/ui" }
 adelite-chat = { path = "crates/chat" }
 adelite-chat-view = { path = "crates/chat-view" }
 adelite-telegram = { path = "crates/telegram" }
+adelite-update = { path = "crates/update" }
 # TDLib speaks JSON, and the settings are a JSON file. Values only: no derive, no proc macros.
 serde_json = "1.0.154"
 winit = "0.30.13"
@@ -29,6 +30,9 @@ png = "0.18.1"
 zune-jpeg = { version = "0.5.15", default-features = false, features = ["std", "x86", "neon"] }
 # why: Telegram sends stickers and some pictures as WebP, from strangers; decoded by a fuzzed pure-Rust crate.
 image-webp = "0.2.4"
+# why: checks the signature of every update before it is run. Ed25519 is not something to write by hand;
+# this crate has no dependencies of its own, and needs none of its default features (keys are made elsewhere).
+ed25519-compact = { version = "2.6.1", default-features = false, features = ["std"] }
 
 [workspace.lints.rust]
 # Unsafe is for C interfaces only; a file that has one says so with `#![expect(unsafe_code)]`.

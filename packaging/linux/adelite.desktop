@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Adelite
+Comment=A desktop app for the day's work
+Exec=adelite
+Icon=adelite
+Terminal=false
+StartupWMClass=adelite
+Categories=Network;Chat;InstantMessaging;

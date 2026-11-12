@@ -1,0 +1,20 @@
+[package]
+name = "adelite-update"
+description = "Adelite's updates: the newest release on GitHub, its signed download, and putting it in place. No interface code."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+# Signs the release files in the release workflow, with the key from `ADELITE_UPDATE_KEY`.
+[[bin]]
+name = "adelite-sign"
+path = "src/bin/adelite-sign.rs"
+
+[dependencies]
+serde_json.workspace = true
+ed25519-compact.workspace = true # why: see the workspace manifest
+
+[lints]
+workspace = true

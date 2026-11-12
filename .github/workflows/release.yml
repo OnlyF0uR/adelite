@@ -1,0 +1,217 @@
+# Builds a release from a tag `vX.Y.Z`: the Windows installer, the macOS app
+# (a .dmg for people, a .tar.gz for the updater) and the Linux archive, each
+# with TDLib and the app's Telegram API pair, then signs them for the updater
+# and leaves them in a draft release to try before publishing.
+#
+# Runs in the `release` environment, which only `v*` tags may use. Its secrets:
+# ADELITE_TELEGRAM_API_ID and ADELITE_TELEGRAM_API_HASH (sealed into the app by
+# crates/telegram/build.rs) and ADELITE_UPDATE_KEY (signs the downloads; see
+# crates/update/src/bin/adelite-sign.rs). Each reaches only the step that needs it.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      # The tag and the workspace's version must agree: the app compares its own
+      # version with the tag of the newest release.
+      - id: version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          crate=$(sed -n '/^\[workspace\.package\]/,/^\[/ s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::the tag is $GITHUB_REF_NAME; a release is tagged vX.Y.Z"
+            exit 1
+          fi
+          if [ "$version" != "$crate" ]; then
+            echo "::error::the tag is $GITHUB_REF_NAME but Cargo.toml says $crate"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  windows:
+    name: Windows
+    needs: version
+    runs-on: windows-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      # TDLib takes the better part of an hour to build: once per pinned commit.
+      - id: tdlib
+        uses: actions/cache@v6
+        with:
+          path: vendor/tdlib
+          key: tdlib-windows-${{ hashFiles('packaging/tdlib/COMMIT', 'packaging/tdlib/build-windows.ps1') }}
+      - if: steps.tdlib.outputs.cache-hit != 'true'
+        run: pwsh packaging/tdlib/build-windows.ps1 -Jobs 4
+      - name: Check the API pair is set
+        shell: bash
+        env:
+          ID: ${{ secrets.ADELITE_TELEGRAM_API_ID }}
+          HASH: ${{ secrets.ADELITE_TELEGRAM_API_HASH }}
+        run: |
+          if [ -z "$ID" ] || [ -z "$HASH" ]; then
+            echo "::error::the release environment lacks ADELITE_TELEGRAM_API_ID or ADELITE_TELEGRAM_API_HASH"
+            exit 1
+          fi
+      - name: Build
+        run: cargo build --release --locked -p adelite
+        env:
+          ADELITE_TELEGRAM_API_ID: ${{ secrets.ADELITE_TELEGRAM_API_ID }}
+          ADELITE_TELEGRAM_API_HASH: ${{ secrets.ADELITE_TELEGRAM_API_HASH }}
+      - name: Make the installer
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force stage, dist | Out-Null
+          Copy-Item target/release/adelite.exe stage/
+          Copy-Item vendor/tdlib/*.dll stage/
+          pwsh packaging/windows/make-ico.ps1 -Out target/adelite.ico
+          $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+            if ($LASTEXITCODE -ne 0) { throw "Inno Setup could not be installed" }
+          }
+          & $iscc "/DAppVersion=$env:VERSION" "/DStagingDir=$PWD\stage" "/DSetupIcon=$PWD\target\adelite.ico" "/O$PWD\dist" packaging\windows\adelite.iss
+          if ($LASTEXITCODE -ne 0) { throw "the installer could not be made" }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows
+          path: dist/*
+          if-no-files-found: error
+
+  macos:
+    name: macOS
+    needs: version
+    runs-on: macos-latest
+    environment: release
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - id: tdlib
+        uses: actions/cache@v6
+        with:
+          path: vendor/tdlib
+          key: tdlib-macos-arm64-${{ hashFiles('packaging/tdlib/COMMIT', 'packaging/tdlib/build-unix.sh') }}
+      - if: steps.tdlib.outputs.cache-hit != 'true'
+        run: |
+          brew install gperf
+          command -v cmake >/dev/null || brew install cmake
+          [ -f "$(brew --prefix openssl@3)/lib/libcrypto.a" ] || brew install openssl@3
+          bash packaging/tdlib/build-unix.sh
+      - name: Check the API pair is set
+        env:
+          ID: ${{ secrets.ADELITE_TELEGRAM_API_ID }}
+          HASH: ${{ secrets.ADELITE_TELEGRAM_API_HASH }}
+        run: |
+          if [ -z "$ID" ] || [ -z "$HASH" ]; then
+            echo "::error::the release environment lacks ADELITE_TELEGRAM_API_ID or ADELITE_TELEGRAM_API_HASH"
+            exit 1
+          fi
+      - name: Build
+        run: cargo build --release --locked -p adelite
+        env:
+          ADELITE_TELEGRAM_API_ID: ${{ secrets.ADELITE_TELEGRAM_API_ID }}
+          ADELITE_TELEGRAM_API_HASH: ${{ secrets.ADELITE_TELEGRAM_API_HASH }}
+      - name: Make the app
+        run: bash packaging/macos/bundle.sh "${{ needs.version.outputs.version }}" target/release/adelite vendor/tdlib/libtdjson.dylib dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos
+          path: dist/*
+          if-no-files-found: error
+
+  linux:
+    name: Linux
+    needs: version
+    # The oldest supported Ubuntu: what is built against its glibc runs on newer ones.
+    runs-on: ubuntu-22.04
+    environment: release
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - id: tdlib
+        uses: actions/cache@v6
+        with:
+          path: vendor/tdlib
+          key: tdlib-linux-x64-${{ hashFiles('packaging/tdlib/COMMIT', 'packaging/tdlib/build-unix.sh') }}
+      - if: steps.tdlib.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gperf cmake g++ libssl-dev zlib1g-dev
+          bash packaging/tdlib/build-unix.sh
+      - name: Check the API pair is set
+        env:
+          ID: ${{ secrets.ADELITE_TELEGRAM_API_ID }}
+          HASH: ${{ secrets.ADELITE_TELEGRAM_API_HASH }}
+        run: |
+          if [ -z "$ID" ] || [ -z "$HASH" ]; then
+            echo "::error::the release environment lacks ADELITE_TELEGRAM_API_ID or ADELITE_TELEGRAM_API_HASH"
+            exit 1
+          fi
+      - name: Build
+        run: cargo build --release --locked -p adelite
+        env:
+          ADELITE_TELEGRAM_API_ID: ${{ secrets.ADELITE_TELEGRAM_API_ID }}
+          ADELITE_TELEGRAM_API_HASH: ${{ secrets.ADELITE_TELEGRAM_API_HASH }}
+      - name: Make the archive
+        run: bash packaging/linux/package.sh "${{ needs.version.outputs.version }}" target/release/adelite vendor/tdlib/libtdjson.so dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: Sign and draft the release
+    needs: [version, windows, macos, linux]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - run: cargo build --release --locked -p adelite-update --bin adelite-sign
+      # Writes <file>.sig beside each file. Refuses a key the app does not trust.
+      - name: Sign
+        run: target/release/adelite-sign dist/*
+        env:
+          ADELITE_UPDATE_KEY: ${{ secrets.ADELITE_UPDATE_KEY }}
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          ls -l dist
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "Adelite $VERSION" --generate-notes dist/*

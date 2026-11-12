@@ -1,6 +1,6 @@
 //! What is drawn around the apps: the brand in the title bar, the rail of
-//! apps along the window's right edge, the settings, and notices. The app
-//! on the rail that is selected fills the rest.
+//! apps along the window's right edge, the settings (updates among them),
+//! and notices. The app on the rail that is selected fills the rest.
 
 use std::time::{Duration, Instant};
 
@@ -8,9 +8,10 @@ use adelite_ui::logo::Logo;
 use adelite_ui::paint::{Painter, Rect, fade, mix};
 use adelite_ui::text::Style;
 use adelite_ui::theme::{self, Scheme};
-use adelite_ui::ui::{Ui, icon, icon_button, id};
+use adelite_ui::ui::{ButtonStyle, Ui, button, icon, icon_button, id};
 use adelite_ui::widgets::{self, MenuItem, chip, dropdown, field_label, modal, toggle};
-use adelite_ui::{Context, Module, titlebar};
+use adelite_ui::{Context, Module, log, platform, titlebar};
+use adelite_update::{Staged, State, Updater, Version};
 use winit::event::KeyEvent;
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::CursorIcon;
@@ -40,11 +41,20 @@ pub struct Shell {
     pub close: CloseAction,
     /// The list of what closing the window can do is open.
     choosing: bool,
+    /// Checks for a newer version and installs it, when the settings ask.
+    updater: Updater,
+}
+
+/// What the update row of the settings was asked to do.
+enum UpdateAction {
+    Check,
+    Install,
+    Open(String),
 }
 
 impl Shell {
-    /// A shell around `modules`, the first one shown.
-    pub fn new(modules: Vec<Box<dyn Module>>) -> Self {
+    /// A shell around `modules`, the first one shown, updated by `updater`.
+    pub fn new(modules: Vec<Box<dyn Module>>, updater: Updater) -> Self {
         Self {
             modules,
             active: 0,
@@ -54,6 +64,7 @@ impl Shell {
             sounds: true,
             close: CloseAction::offered()[0],
             choosing: false,
+            updater,
         }
     }
 
@@ -62,11 +73,21 @@ impl Shell {
         self.modules.get_mut(self.active)
     }
 
-    /// Lets every app take in what its threads left for it.
+    /// Lets every app take in what its threads left for it, and the updater too.
     pub fn poll(&mut self, cx: &mut Context<'_>) {
         for module in &mut self.modules {
             module.poll(cx);
         }
+        if self.updater.poll()
+            && let State::Failed(e) = self.updater.state()
+        {
+            log::error(format!("updating: {e} {}", e.detail()));
+        }
+    }
+
+    /// An update that is downloaded, checked and ready: the app quits and applies it.
+    pub fn take_update(&mut self) -> Option<Staged> {
+        self.updater.take_staged()
     }
 
     /// Opens the settings, for the snapshots.
@@ -281,7 +302,7 @@ impl Shell {
             self.choosing = true;
         }
         p.label(self.close.detail(), theme::TINY, x, card.y + 396.0, t.text_faint);
-        p.label(concat!("Adelite ", env!("CARGO_PKG_VERSION")), theme::TINY, x, card.bottom() - 36.0, t.text_faint);
+        self.draw_update(p, ui, Rect::new(x, card.bottom() - 62.0, card.w - 48.0, 36.0));
         ui.blocker = outer;
         if was_choosing {
             let offered = CloseAction::offered();
@@ -299,6 +320,81 @@ impl Shell {
             }
         }
         chosen
+    }
+
+    /// The version and updating it: where it stands on the left, what can be
+    /// done on the right. Nothing is downloaded until asked.
+    fn draw_update(&mut self, p: &mut Painter<'_>, ui: &mut Ui, row: Rect) {
+        let t = p.theme;
+        let mut end = row.right();
+        let mut action = None;
+        let mut offer = |p: &mut Painter<'_>, ui: &mut Ui, label: &str, style: ButtonStyle, enabled: bool| {
+            let width = (p.layout(label, theme::LABEL, None).width() + 28.0).round();
+            end -= width;
+            let rect = Rect::new(end, row.y + (row.h - 30.0) * 0.5, width, 30.0);
+            end -= 8.0;
+            button(p, ui, rect, label, style, enabled)
+        };
+        let (words, tint) = match self.updater.state() {
+            state @ (State::Idle | State::Current | State::Checking) => {
+                let checking = *state == State::Checking;
+                if offer(p, ui, "Check for updates", ButtonStyle::Secondary, !checking) {
+                    action = Some(UpdateAction::Check);
+                }
+                let words = match state {
+                    State::Current => format!("Adelite {} is up to date.", Version::current()),
+                    State::Checking => format!("Adelite {}, looking for a newer one…", Version::current()),
+                    _ => format!("Adelite {}", Version::current()),
+                };
+                (words, t.text_faint)
+            }
+            State::Available(release) => {
+                let installable = release.download.is_some();
+                if installable && offer(p, ui, "Install and restart", ButtonStyle::Primary, true) {
+                    action = Some(UpdateAction::Install);
+                }
+                if offer(p, ui, "What's new", ButtonStyle::Ghost, true) {
+                    action = Some(UpdateAction::Open(release.page.clone()));
+                }
+                let words = if installable {
+                    format!("Adelite {} is out.", release.version)
+                } else {
+                    format!("Adelite {} is out, not yet for this system.", release.version)
+                };
+                (words, t.text_muted)
+            }
+            State::Downloading { version, done, size } => {
+                offer(p, ui, "Installing…", ButtonStyle::Primary, false);
+                let words = if *size > 0 {
+                    format!("Downloading Adelite {version}… {}%", (done * 100 / size).min(100))
+                } else {
+                    format!("Downloading Adelite {version}…")
+                };
+                (words, t.text_muted)
+            }
+            State::Ready(version) => {
+                offer(p, ui, "Restarting…", ButtonStyle::Primary, false);
+                (format!("Adelite {version} is ready."), t.text_muted)
+            }
+            State::Failed(e) => {
+                if offer(p, ui, "Try again", ButtonStyle::Secondary, true) {
+                    action = Some(UpdateAction::Check);
+                }
+                (e.to_string(), t.danger)
+            }
+        };
+        let words = p.layout(&words, theme::TINY, Some((end - row.x - 8.0).max(80.0)));
+        p.text(&words, row.x, (row.y + (row.h - words.height()) * 0.5).round(), tint);
+        match action {
+            Some(UpdateAction::Check) => self.updater.check(),
+            Some(UpdateAction::Install) => self.updater.install(),
+            Some(UpdateAction::Open(page)) => {
+                if let Err(e) = platform::open_url(&page) {
+                    self.tell(format!("The release's page could not be opened: {e}"), true);
+                }
+            }
+            None => {}
+        }
     }
 
     /// The notice, at the foot of the page until it is clicked or its time is up.

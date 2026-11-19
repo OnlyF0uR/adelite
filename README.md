@@ -153,7 +153,10 @@ This builds the TDLib commit pinned in `packaging/tdlib/COMMIT` from Telegram's 
 `bash packaging/tdlib/build-unix.sh` builds the same commit into `vendor/tdlib/libtdjson.dylib` or
 `libtdjson.so`, with OpenSSL linked in, so the library needs nothing that is not on every system
 (it needs git, CMake, a C++ compiler, gperf, and OpenSSL's and zlib's headers; the script names them).
-The release workflow builds it the same way and packs it with the app.
+The release workflow builds it the same way and packs it with the app. On Windows, `adelite.exe` has
+Microsoft's C runtime linked in (`.cargo/config.toml`), but TDLib's DLLs need the runtime's own DLLs, which
+a fresh Windows lacks: `packaging/windows/add-runtime.ps1` puts them beside the app, and fails the
+release if anything there still needs one that is missing.
 
 ### The API id and hash
 

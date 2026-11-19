@@ -87,6 +87,7 @@ jobs:
           New-Item -ItemType Directory -Force stage, dist | Out-Null
           Copy-Item target/release/adelite.exe stage/
           Copy-Item vendor/tdlib/*.dll stage/
+          & ./packaging/windows/add-runtime.ps1 -Stage stage
           pwsh packaging/windows/make-ico.ps1 -Out target/adelite.ico
           $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) {
